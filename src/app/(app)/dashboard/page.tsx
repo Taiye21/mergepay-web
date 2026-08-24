@@ -273,7 +273,10 @@ function GroupCard({ group }: { group: GroupSummary }) {
         <div className="flex items-start justify-between p-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="truncate font-display text-lg uppercase tracking-tight">
+              <h3
+                className="truncate font-display text-lg uppercase tracking-tight"
+                title={group.name}
+              >
                 {group.name}
               </h3>
               {group.treasuryEnabled && <Badge tone="aqua">Treasury</Badge>}
