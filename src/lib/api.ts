@@ -99,6 +99,12 @@ export class ApiTimeoutError extends Error {
 }
 
 let expiryHandled = false;
+let onSessionExpired: (() => void) | null = null;
+
+/** Register the browser-session recovery hook without coupling this module to React. */
+export function setSessionExpiredHandler(handler: (() => void) | null): void {
+  onSessionExpired = handler;
+}
 
 export function isSessionExpired(): boolean {
   return expiryHandled;
@@ -176,6 +182,7 @@ async function request<T>(
   if (res.status === 401 && token && !expiryHandled) {
     expiryHandled = true;
     useAuth.getState().clear();
+    onSessionExpired?.();
   }
 
   if (!res.ok) {
