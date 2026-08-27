@@ -21,14 +21,13 @@ import { handleApiError } from "@/lib/errorHandler";
 import { signXdr, WalletError, NotInstalledMessage } from "@/lib/stellar";
 import { Timestamp } from "@/components/timestamp";
 import type { AnchorSessionKind } from "@/lib/types";
-import type { AnchorSession } from "@/lib/types";
-import { AnchorFlowModal } from "@/components/AnchorFlowModal";
+import { AnchorInteractiveModal } from "@/components/AnchorInteractiveModal";
 
 export default function AnchorsPage() {
   const anchors = useAnchors();
   const sessions = useAnchorSessions();
   const [busy, setBusy] = useState<string | null>(null);
-  const [activeSession, setActiveSession] = useState<AnchorSession | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   async function startFlow(
     kind: AnchorSessionKind,
@@ -56,9 +55,9 @@ export default function AnchorsPage() {
       });
 
       sessions.refetch();
-      setActiveSession(session);
       if (session.interactiveUrl) {
-        toast.success("Anchor flow ready");
+        setActiveSessionId(session.id);
+        toast.success("Complete the transfer in the secure anchor window");
       } else {
         toast.success("Anchor session started");
       }
@@ -161,8 +160,6 @@ export default function AnchorsPage() {
         />
       )}
 
-      <AnchorFlowModal session={activeSession} onClose={() => setActiveSession(null)} />
-
       <h2 className="mb-3 mt-10 font-display text-xl uppercase tracking-tight">
         Your transfers
       </h2>
@@ -215,6 +212,10 @@ export default function AnchorsPage() {
       ) : (
         <p className="text-sm text-ink/50">No anchor transfers yet.</p>
       )}
+      <AnchorInteractiveModal
+        sessionId={activeSessionId}
+        onClose={() => setActiveSessionId(null)}
+      />
     </>
   );
 }

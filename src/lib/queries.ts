@@ -30,7 +30,11 @@ import type { ExpensesPage } from "./expenses";
 import { shouldResetQueryCache } from "./queryState";
 import { mergeHistoryPages, type AccumulatedHistory } from "./expenses";
 import type { Expense, LedgerEntry, Settlement } from "./types";
-import type { HistoryResponse, LedgerResponse } from "./types";
+import type { HistoryResponse, LedgerResponse, AnchorSessionStatus } from "./types";
+import {
+  ANCHOR_POLL_MAX_PERSISTENT_FAILURES,
+  anchorPollInterval,
+} from "./anchor-state";
 import {
   createOptimisticExpenseEvent,
   calculateOptimisticActivityList,
@@ -260,6 +264,41 @@ export function useAnchorSessions() {
     queryFn: api.anchorSessions,
     refetchInterval: 15_000,
   });
+}
+
+export function useAnchorSession(sessionId: string | null) {
+  const failureCount = useRef(0);
+  const [pollingStalled, setPollingStalled] = useState(false);
+
+  const query = useQuery({
+    queryKey: ["anchors", "session", sessionId],
+    queryFn: () => api.anchorSession(sessionId as string),
+    enabled: Boolean(sessionId),
+    refetchInterval: (q) =>
+      anchorPollInterval({
+        state: {
+          data: q.state.data?.session as { status?: AnchorSessionStatus } | undefined,
+        },
+        failureCount: failureCount.current,
+      }),
+    refetchIntervalInBackground: false,
+    retry: false,
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (query.isError) {
+      failureCount.current += 1;
+      if (failureCount.current >= ANCHOR_POLL_MAX_PERSISTENT_FAILURES) {
+        setPollingStalled(true);
+      }
+    } else if (query.isSuccess) {
+      failureCount.current = 0;
+      setPollingStalled(false);
+    }
+  }, [query.isError, query.isSuccess, query.errorUpdatedAt, query.dataUpdatedAt]);
+
+  return { ...query, pollingStalled };
 }
 
 export function useInfiniteHistory(options: { limit?: number } = {}) {
