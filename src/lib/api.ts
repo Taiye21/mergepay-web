@@ -52,6 +52,7 @@ import type {
   EnableTreasuryRequest,
   ExpenseResponse,
   ExpensesResponse,
+  GroupActivityResponse,
   GroupDetail,
   GroupResponse,
   GroupsResponse,
@@ -74,6 +75,7 @@ import type {
   UpdateMeRequest,
   UploadResponse,
   VerifyResponse,
+  Role,
 } from "./types";
 import type { ExpensesPage } from "./expenses";
 
@@ -268,6 +270,30 @@ export const api = {
       method: "POST",
       schema: GroupResponseSchema as unknown as z.ZodType<GroupResponse>,
     }),
+  updateMemberRole: (groupId: string, memberId: string, role: Role) =>
+    request<{ ok: boolean }>(`/groups/${groupId}/members/${memberId}/role`, {
+      method: "PATCH",
+      json: { role },
+      schema: OkResponseSchema as unknown as z.ZodType<{ ok: boolean }>,
+    }),
+  removeMember: (groupId: string, memberId: string) =>
+    request<{ ok: boolean }>(`/groups/${groupId}/members/${memberId}`, {
+      method: "DELETE",
+      schema: OkResponseSchema as unknown as z.ZodType<{ ok: boolean }>,
+    }),
+
+  getGroupActivity: async (groupId: string): Promise<GroupActivityResponse> => {
+    try {
+      return await request<GroupActivityResponse>(`/groups/${groupId}/activity`);
+    } catch {
+      const [detail, expensesRes] = await Promise.all([
+        api.getGroup(groupId).catch(() => null),
+        api.listExpenses(groupId).catch(() => ({ expenses: [] })),
+      ]);
+      const { synthesizeActivityEvents } = await import("./activity");
+      return { activities: synthesizeActivityEvents(detail, expensesRes.expenses) };
+    }
+  },
 
   // -- expenses ---------------------------------------------------------------
   /**
@@ -518,6 +544,10 @@ export const api = {
     request<AnchorSessionsResponse>("/anchors/sessions", {
       schema: AnchorSessionsResponseSchema as unknown as z.ZodType<AnchorSessionsResponse>,
     }),
+  getAnchorSession: (sessionId: string) =>
+    request<AnchorSessionResponse>(`/anchors/sessions/${sessionId}`, {
+      schema: AnchorSessionResponseSchema as unknown as z.ZodType<AnchorSessionResponse>,
+    }),
 
   // -- history & uploads ------------------------------------------------------------
   /**
@@ -548,3 +578,14 @@ export const api = {
     });
   },
 };
+
+/**
+ * Fetch invite details by code without redeeming the invite.
+ * Kept outside the `api` object to avoid TypeScript inference-depth
+ * issues with the very large object literal.
+ */
+export function getInviteByCode(code: string) {
+  return request<InviteResponse>(`/invites/${encodeURIComponent(code)}`, {
+    schema: InviteResponseSchema as unknown as z.ZodType<InviteResponse>,
+  });
+}

@@ -4,15 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useGroupStore } from "@/lib/group-store";
 import {
+  Activity,
   ChevronDown,
   Landmark,
   ListChecks,
   Plus,
+  QrCode,
   Receipt,
   Scale,
   ScrollText,
   Users,
 } from "lucide-react";
+import { GroupActivityFeed } from "@/components/groups/GroupActivityFeed";
 import { PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +24,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ListSkeleton } from "@/components/ui/skeleton";
 import { AddExpenseDialog } from "@/components/expenses/add-expense-dialog";
 import { ExpenseCard } from "@/components/expenses/expense-card";
+import { ExportHistoryButton } from "@/components/expenses/ExportHistoryButton";
+import { ExportGroupStatementButton } from "@/components/ExportGroupStatementButton";
+import { RecurringExpenseScheduler } from "@/components/RecurringExpenseScheduler";
+import { ShareQrModal } from "@/components/ShareQrModal";
+
+import { GroupAnalytics } from "@/components/expenses/GroupAnalytics";
+import { GroupBudgetTracker } from "@/components/GroupBudgetTracker";
 import { SettleDialog, type BulkSettleTarget } from "@/components/settle/settle-dialog";
 import { BulkSettleBar } from "@/components/settle/bulk-settle-bar";
 import { buildBulkTarget, type UnsettledShare } from "@/lib/bulkSettle";
@@ -33,14 +43,14 @@ import {
   SectionError,
   SectionLoading,
 } from "@/components/ui/section";
-import { useGroup, useInfiniteExpenses, useMe } from "@/lib/queries";
+import { useGroup, useInfiniteExpenses, useLedger, useMe } from "@/lib/queries";
 import type { GroupMember } from "@/lib/types";
 import { mergeExpensePages, sortExpensesByDateDesc } from "@/lib/expenses";
 import { apiErrorMessage } from "@/lib/errorHandler";
 import { resolveSectionStatus } from "@/lib/sectionState";
 import { useWalletDisconnected } from "@/lib/wallet-store";
 
-type Tab = "expenses" | "balances" | "ledger" | "treasury" | "members";
+type Tab = "expenses" | "activity" | "recurring" | "balances" | "ledger" | "treasury" | "members";
 
 /**
  * Records per request. Large enough that most groups never need a second
@@ -57,6 +67,7 @@ export default function GroupDetailPage() {
   const { data: detail, isLoading, isError, error, refetch } = useGroup(id);
   const [tab, setTab] = useState<Tab>("expenses");
   const [addOpen, setAddOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   // Keep the active group id in a tiny client store so sibling routes
   // (e.g. balances, treasury) can reuse it without re-fetching.
   const setSelectedGroup = useGroupStore((s) => s.setSelectedGroup);
@@ -91,27 +102,39 @@ export default function GroupDetailPage() {
 
   const { group } = detail;
 
+  const headerAction = (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setQrOpen(true)}
+        title="Share Group QR Code"
+      >
+        <QrCode className="h-4 w-4" /> Share QR
+      </Button>
+      {tab === "expenses" ? (
+        <Button
+          onClick={() => setAddOpen(true)}
+          disabled={walletDisconnected}
+          title={
+            walletDisconnected
+              ? "Reconnect your wallet to add an expense"
+              : undefined
+          }
+        >
+          <Plus className="h-4 w-4" /> Add expense
+        </Button>
+      ) : null}
+    </div>
+  );
+
   return (
     <>
       <PageHeader
         back={{ href: "/groups", label: "All groups" }}
         title={group.name}
         description={group.description ?? undefined}
-        action={
-          tab === "expenses" && (
-            <Button
-              onClick={() => setAddOpen(true)}
-              disabled={walletDisconnected}
-              title={
-                walletDisconnected
-                  ? "Reconnect your wallet to add an expense"
-                  : undefined
-              }
-            >
-              <Plus className="h-4 w-4" /> Add expense
-            </Button>
-          )
-        }
+        action={headerAction}
       />
 
       {group.archived && (
@@ -129,6 +152,16 @@ export default function GroupDetailPage() {
             id: "expenses",
             label: "Expenses",
             icon: <Receipt className="h-4 w-4" />,
+          },
+          {
+            id: "activity",
+            label: "Activity",
+            icon: <Activity className="h-4 w-4" />,
+          },
+          {
+            id: "recurring",
+            label: "Recurring",
+            icon: <Landmark className="h-4 w-4" />,
           },
           {
             id: "balances",
@@ -162,7 +195,22 @@ export default function GroupDetailPage() {
             groupId={id}
             currentUserId={currentUserId}
             members={detail.members}
+            yourRole={detail.yourRole}
             onAdd={() => setAddOpen(true)}
+          />
+        </SectionBoundary>
+      )}
+      {tab === "activity" && (
+        <SectionBoundary subject="the activity feed">
+          <GroupActivityFeed groupId={id} />
+        </SectionBoundary>
+      )}
+      {tab === "recurring" && (
+        <SectionBoundary subject="the recurring scheduler">
+          <RecurringExpenseScheduler
+            groupId={id}
+            members={detail.members}
+            currentUserId={currentUserId}
           />
         </SectionBoundary>
       )}
@@ -194,7 +242,16 @@ export default function GroupDetailPage() {
         members={detail.members}
         currentUserId={currentUserId}
       />
+
+      <ShareQrModal
+        open={qrOpen}
+        onClose={() => setQrOpen(false)}
+        title={`Share ${group.name}`}
+        description="Scan this QR code on any device to open this group directly."
+        shareUrl={typeof window !== "undefined" ? `${window.location.origin}/groups/${id}` : `https://mergepay.app/groups/${id}`}
+      />
     </>
+
   );
 }
 
@@ -202,11 +259,13 @@ function ExpensesTab({
   groupId,
   currentUserId,
   members,
+  yourRole,
   onAdd,
 }: {
   groupId: string;
   currentUserId: string;
   members: GroupMember[];
+  yourRole: "admin" | "member" | "viewer";
   onAdd: () => void;
 }) {
   // Bulk-settle selection state. Kept local to this tab so leaving the
@@ -259,6 +318,17 @@ function ExpensesTab({
     });
     setBulkOpen(true);
   }
+
+  // Fetch the full ledger for the comprehensive statement export.
+  // Must be called before any early returns to satisfy rules-of-hooks.
+  const { data: ledgerPages } = useLedger(groupId);
+  const ledgerEntries = ledgerPages?.entries ?? [];
+  const ledgerExpenses = ledgerEntries
+    .filter((e) => e.type === "expense")
+    .map((e) => e.expense);
+  const ledgerSettlements = ledgerEntries
+    .filter((e) => e.type === "settlement")
+    .map((e) => e.settlement);
 
   const status = resolveSectionStatus({
     isLoading,
@@ -313,7 +383,7 @@ function ExpensesTab({
 
   // Action area changes when bulk-select is on, mirroring the issue's
   // "Settle" button requirement on the group detail page. The "Add
-  // expense" button stays in the page header — this row is only for
+  // expense" button stays in the page header - this row is only for
   // bulk-select controls.
   const actionArea = selectMode ? (
     <div className="flex items-center justify-end gap-2">
@@ -323,7 +393,13 @@ function ExpensesTab({
       </Button>
     </div>
   ) : (
-    <div className="flex items-center justify-end">
+    <div className="flex items-center justify-end gap-2">
+      <ExportHistoryButton groupId={groupId} currentUserId={currentUserId} />
+      <ExportGroupStatementButton
+        groupId={groupId}
+        expenses={expenses.length > 0 ? expenses : ledgerExpenses}
+        settlements={ledgerSettlements}
+      />
       <Button variant="outline" size="sm" onClick={() => setSelectMode(true)}>
         <ListChecks className="h-4 w-4" /> Settle in bulk
       </Button>
@@ -332,6 +408,14 @@ function ExpensesTab({
 
   return (
     <>
+      <GroupBudgetTracker
+        className="mb-4"
+        groupId={groupId}
+        expenses={expenses}
+        assetCode={expenses[0]?.assetCode ?? null}
+        isAdmin={yourRole === "admin"}
+      />
+      <GroupAnalytics expenses={expenses} />
       <div className="mb-4 flex items-center justify-between">{actionArea}</div>
       <div className="space-y-3">
         <ul className="space-y-3" aria-label="Group expenses">
@@ -381,7 +465,7 @@ function ExpensesTab({
             >
               {!isFetchingNextPage && <ChevronDown className="h-4 w-4" />}
               {isFetchingNextPage
-                ? "Loading…"
+                ? "Loading."
                 : isError
                   ? "Try again"
                   : "Load older expenses"}
