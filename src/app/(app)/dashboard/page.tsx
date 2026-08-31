@@ -91,7 +91,7 @@ export default function DashboardPage() {
                   <div className="mt-6 flex items-center justify-between pt-4 border-t-2 border-ink/10">
                     <span className="text-xs font-mono text-ink/50">
                       {group.memberCount ?? 1} member{(group.memberCount ?? 1) === 1 ? "" : "s"}
-                    ંચ</span>
+                    </span>
                     <Link href={`/groups/${group.id}`}>
                       <Button size="sm" variant="outline">
                         Open <ArrowRight className="h-3.5 w-3.5 ml-1" />
@@ -107,58 +107,6 @@ export default function DashboardPage() {
         <CreateGroupDialog open={createOpen} onClose={() => setCreateOpen(false)} />
         <JoinGroupDialog open={joinOpen} onClose={() => setJoinOpen(false)} />
       </div>
-    </Card>
-  );
-}
-
-function GroupCard({ group }: { group: GroupSummary }) {
-  // Stroop-exact: a balance is only "settled" when it is exactly zero.
-  const stroops = amountToStroops(group.yourNet);
-  const settled = stroops === 0n;
-  const net = group.yourNet;
-  return (
-    <Link href={`/groups/${group.id}`}>
-      <Card hover className="h-full">
-        <div className="flex items-start justify-between p-5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h3
-                className="truncate font-display text-lg uppercase tracking-tight"
-                title={group.name}
-              >
-                {group.name}
-              </h3>
-              {group.treasuryEnabled && <Badge tone="aqua">Treasury</Badge>}
-            </div>
-            {group.description && (
-              <p className="mt-1 line-clamp-1 text-sm text-ink/60">
-                {group.description}
-              </p>
-            )}
-            <div className="mt-3 flex items-center gap-1.5 text-xs text-ink/50">
-              <Users className="h-3.5 w-3.5" />
-              {group.memberCount} member{group.memberCount === 1 ? "" : "s"}
-            </div>
-          </div>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-3 border-ink bg-butter shadow-brutal-sm">
-            <Wallet className="h-5 w-5" />
-          </div>
-        </div>
-        <div className="flex items-center justify-between border-t-3 border-ink bg-paper px-5 py-2.5">
-          <span className="font-display text-[10px] uppercase tracking-widest text-ink/50">
-            {settled
-              ? "All settled"
-              : stroops !== null && stroops > 0n
-                ? "You are owed"
-                : "You owe"}
-          </span>
-          {settled ? (
-            <Badge tone="lime">Settled up</Badge>
-          ) : (
-            <NetAmount value={net} assetCode={group.netAssetCode} />
-          )}
-        </div>
-      </Card>
-    </Link>
+    </ErrorBoundary>
   );
 }
