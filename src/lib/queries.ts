@@ -28,6 +28,11 @@ import type {
 } from "./types";
 import type { ExpensesPage } from "./expenses";
 import { shouldResetQueryCache } from "./queryState";
+import {
+  aggregateTreasury,
+  type TreasuryAggregate,
+  type TreasurySource,
+} from "./treasury";
 import { mergeHistoryPages, type AccumulatedHistory } from "./expenses";
 import type { Expense, LedgerEntry, Settlement, User } from "./types";
 import type { HistoryResponse, LedgerResponse } from "./types";
@@ -150,14 +155,14 @@ export function useInviteByCode(code: string | null) {
   });
 }
 
-export function useExpenses(groupId: string) {
+export function useExpenses(groupId?: string) {
   // Uses the global default staleTime (30s, see src/lib/queryClient.ts):
   // list data is shown from cache instantly and revalidated in the
   // background (stale-while-revalidate), while expense mutations still
   // force a refetch through `invalidateQueries`.
   return useQuery({
-    queryKey: qk.expenses(groupId),
-    queryFn: () => api.listExpenses(groupId),
+    queryKey: qk.expenses(groupId ?? "_"),
+    queryFn: () => api.listExpenses(groupId as string),
     staleTime: 30_000,
     enabled: useSessionEnabled() && Boolean(groupId),
   });
@@ -221,6 +226,25 @@ export function useLedger(groupId: string) {
 }
 
 /**
+ * Group-scoped settlement entries, derived from the group ledger.
+ *
+ * Keeps only the settlement entries of a group's ledger so callers can
+ * render or export just the settlements without re-shaping the feed.
+ */
+export function useSettlements(groupId?: string) {
+  return useQuery({
+    queryKey: qk.ledger(groupId ?? "_"),
+    queryFn: () => api.getLedger(groupId as string),
+    enabled: Boolean(groupId),
+    select: (data: LedgerResponse) => ({
+      settlements: data.entries
+        .filter((entry) => entry.type === "settlement")
+        .map((entry) => entry.settlement),
+    }),
+  });
+}
+
+/**
  * Cursor-paginated ledger backed by GET /groups/:id/ledger.
  *
  * Use this for groups with many entries — loading the full dataset
@@ -259,6 +283,52 @@ export function useTreasuryHistory(groupId: string, enabled: boolean) {
     queryFn: () => api.treasuryHistory(groupId),
     enabled,
   });
+}
+
+/**
+ * Aggregate treasury balances across every group the user belongs to that has
+ * a treasury enabled, summed per asset code (#392).
+ *
+ * Each enabled treasury is fetched in parallel with {@link useQueries} so the
+ * widget gets a single, collective picture. Loading state reflects at least
+ * one request still in flight; a failure in one treasury does not blank the
+ * whole aggregate (the healthy results still render).
+ */
+export function useTreasuryAggregate(
+  groups: { id: string; name: string; treasuryEnabled: boolean }[] = []
+): {
+  data: TreasuryAggregate | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
+} {
+  const sessionEnabled = useSessionEnabled();
+  const enabled = groups.filter((g) => g.treasuryEnabled);
+  const ids = enabled.map((g) => g.id).sort();
+
+  const query = useQuery({
+    queryKey: ["treasury", "aggregate", ids],
+    queryFn: async (): Promise<TreasuryAggregate> => {
+      const results = await Promise.allSettled(
+        enabled.map((g) => api.treasuryInfo(g.id))
+      );
+      const sources: TreasurySource[] = enabled.map((g, i) => ({
+        groupId: g.id,
+        groupName: g.name,
+        balances:
+          results[i].status === "fulfilled" ? (results[i].value.balances ?? []) : [],
+      }));
+      return aggregateTreasury(sources);
+    },
+    enabled: sessionEnabled && enabled.length > 0,
+  });
+
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    refetch: () => void query.refetch(),
+  };
 }
 
 export function useAnchors() {
