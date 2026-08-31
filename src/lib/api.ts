@@ -166,7 +166,9 @@ async function request<T>(
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, { ...options, headers, body });
+    // Browser calls go through the same-origin Next.js API proxy
+    // (src/app/api/*), which forwards to the backend via API_URL.
+    res = await fetch(`/api${path}`, { ...options, headers, body });
   } catch (err) {
     // fetch only rejects on network-level failures (offline, DNS, CORS)
     // or intentional aborts. Normalize and report centrally — every call
@@ -328,7 +330,7 @@ export const api = {
 
     try {
       const res = await fetch(
-        `${API_URL}/groups/${groupId}/expenses`,
+        `/api/groups/${groupId}/expenses`,
         {
           method: "POST",
           headers,

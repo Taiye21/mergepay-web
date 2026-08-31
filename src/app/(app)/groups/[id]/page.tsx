@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Plus, Users, Receipt, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { AddExpenseDialog } from "@/components/expenses/add-expense-dialog";
-import { SettleDialog } from "@/components/settle/settle-dialog";
 import { InviteModal } from "@/components/groups/InviteModal";
 import { BalancesPanel } from "@/components/balances/balances-panel";
 import { ExpenseCard } from "@/components/expenses/expense-card";
@@ -33,7 +32,7 @@ export default function GroupDetailPage() {
   const expenses: Expense[] = expensesQuery.data?.expenses ?? [];
   const balances = balancesQuery.data?.balances ?? [];
   const settlements = settlementsQuery.data?.settlements ?? [];
-  const members: GroupMember[] = group?.members ?? [];
+  const members: GroupMember[] = groupQuery.data?.members ?? [];
   const currentUserId = "user-1"; // Fallback or session user ID
   const isAdmin = true;
 
@@ -87,7 +86,7 @@ export default function GroupDetailPage() {
               <div className="space-y-4">
                 <h2 className="font-display text-sm uppercase tracking-widest text-ink/60">
                   Expenses ({expenses.length})
-                </h1>
+                </h2>
                 {expensesQuery.isLoading && <p>Loading expenses...</p>}
                 {expensesQuery.isError && (
                   <div className="rounded-xl border-2 border-ink bg-flamingo-pale p-4">
@@ -115,8 +114,6 @@ export default function GroupDetailPage() {
             <ErrorBoundary>
               <BalancesPanel
                 groupId={groupId}
-                balances={balances}
-                members={members}
                 currentUserId={currentUserId}
               />
             </ErrorBoundary>
@@ -132,6 +129,7 @@ export default function GroupDetailPage() {
           onClose={() => setAddExpenseOpen(false)}
           groupId={groupId}
           members={members}
+          currentUserId={currentUserId}
         />
 
         <InviteModal

@@ -75,7 +75,7 @@ export class ErrorBoundary extends Component<Props, State> {
             )}
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button onClick={this.handleReset} variant="default">
+              <Button onClick={this.handleReset} variant="primary">
                 <RefreshCw className="h-4 w-4 mr-1" />
                 Try Again
               </Button>

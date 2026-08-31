@@ -155,14 +155,14 @@ export function useInviteByCode(code: string | null) {
   });
 }
 
-export function useExpenses(groupId: string) {
+export function useExpenses(groupId?: string) {
   // Uses the global default staleTime (30s, see src/lib/queryClient.ts):
   // list data is shown from cache instantly and revalidated in the
   // background (stale-while-revalidate), while expense mutations still
   // force a refetch through `invalidateQueries`.
   return useQuery({
-    queryKey: qk.expenses(groupId),
-    queryFn: () => api.listExpenses(groupId),
+    queryKey: qk.expenses(groupId ?? "_"),
+    queryFn: () => api.listExpenses(groupId as string),
     staleTime: 30_000,
     enabled: useSessionEnabled() && Boolean(groupId),
   });
@@ -222,6 +222,25 @@ export function useLedger(groupId: string) {
   return useQuery({
     queryKey: qk.ledger(groupId),
     queryFn: () => api.getLedger(groupId),
+  });
+}
+
+/**
+ * Group-scoped settlement entries, derived from the group ledger.
+ *
+ * Keeps only the settlement entries of a group's ledger so callers can
+ * render or export just the settlements without re-shaping the feed.
+ */
+export function useSettlements(groupId?: string) {
+  return useQuery({
+    queryKey: qk.ledger(groupId ?? "_"),
+    queryFn: () => api.getLedger(groupId as string),
+    enabled: Boolean(groupId),
+    select: (data: LedgerResponse) => ({
+      settlements: data.entries
+        .filter((entry) => entry.type === "settlement")
+        .map((entry) => entry.settlement),
+    }),
   });
 }
 

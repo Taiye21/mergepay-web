@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "../../components/ui/button";
-import { Section } from "../../components/ui/section";
-import { HistoryFilterBar } from "../../components/history/HistoryFilterBar";
-import { useGroupStore } from "../../lib/group-store";
-import { useExpenses, useSettlements } from "../../lib/queries";
-import { exportTransactionHistoryCsv } from "../../lib/exportCsv";
+import { Button } from "../../../components/ui/button";
+import { Section } from "../../../components/ui/section";
+import { HistoryFilterBar } from "../../../components/history/HistoryFilterBar";
+import { useGroupStore } from "../../../lib/group-store";
+import { useExpenses, useSettlements } from "../../../lib/queries";
+import { exportTransactionHistoryCsv } from "../../../lib/exportCsv";
+import type { HistoryFilters } from "../../../lib/historyFilter";
 
 export default function HistoryPage() {
   const selectedGroupId = useGroupStore((s) => s.selectedGroupId);
@@ -18,7 +19,7 @@ export default function HistoryPage() {
   const expenses = expenseData?.expenses ?? [];
   const settlements = settlementData?.settlements ?? [];
 
-  const [filters, setFilters] = useState({});
+  const [filters, setFilters] = useState<HistoryFilters>({});
 
   function handleExport() {
     if (!selectedGroupId) {
@@ -40,7 +41,7 @@ export default function HistoryPage() {
       }
     >
       <div className="space-y-4">
-        <HistoryFilterBar filters={filters} onChange={setFilters} />
+        <HistoryFilterBar value={filters} onChange={setFilters} />
         <div className="rounded-2xl border-3 border-ink bg-paper p-6 shadow-hard">
           <p className="text-sm text-ink/70">
             {expenses.length} expenses and {settlements.length} settlements recorded.
