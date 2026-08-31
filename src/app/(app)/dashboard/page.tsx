@@ -78,7 +78,7 @@ export default function DashboardPage() {
                 <CardContent className="flex flex-col justify-between h-full p-5">
                   <div>
                     <div className="flex items-center justify-between">
-                      <span className="font-display text-lg uppercase tracking-tight truncate">
+                      <span className="font-display text-lg uppercase tracking-tight truncate" title={group.name}>
                         {group.name}
                       </span>
                     </div>

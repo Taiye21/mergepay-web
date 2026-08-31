@@ -73,7 +73,7 @@ export default function GroupsPage() {
                         {group.memberCount} member{group.memberCount === 1 ? "" : "s"}
                       </span>
                     </div>
-                    <h2 className="font-display text-lg uppercase tracking-tight truncate">
+                    <h2 className="font-display text-lg uppercase tracking-tight truncate" title={group.name}>
                       {group.name}
                     </h2>
                     {group.description && (
