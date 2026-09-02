@@ -554,6 +554,10 @@ export const api = {
       json: data,
       schema: AnchorSessionResponseSchema as unknown as z.ZodType<AnchorSessionResponse>,
     }),
+  anchorSession: (sessionId: string) =>
+    request<AnchorSessionResponse>(`/anchors/sessions/${sessionId}`, {
+      schema: AnchorSessionResponseSchema as unknown as z.ZodType<AnchorSessionResponse>,
+    }),
   anchorSessions: () =>
     request<AnchorSessionsResponse>("/anchors/sessions", {
       schema: AnchorSessionsResponseSchema as unknown as z.ZodType<AnchorSessionsResponse>,
