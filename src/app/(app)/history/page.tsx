@@ -31,6 +31,7 @@ import {
 } from "@/lib/historyFilter";
 import { printReceipt } from "@/lib/export";
 import { exportTransactionHistoryCsv } from "@/lib/utils/transactionHistoryCsv";
+import { AuditDetails, GroupExportButton } from "@/components/GroupHistoryExport";
 import { Timestamp } from "@/components/timestamp";
 
 import { Pagination } from "@/components/ui/pagination";
@@ -131,6 +132,7 @@ export default function HistoryPage() {
               >
                 <Download className="h-4 w-4" /> Export CSV
               </Button>
+              <GroupExportButton expenses={expenses} settlements={settlements} />
             </div>
           )
         }
@@ -240,6 +242,7 @@ export default function HistoryPage() {
                     settlement={s}
                     className="w-full border-t-2 border-ink/10 pt-3"
                   />
+                  <AuditDetails settlement={s} />
                 </Card>
               );
             })}
