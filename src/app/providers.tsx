@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
+import { ThemeProvider } from "@/components/ui/theme-provider";
 import { createQueryClient } from "@/lib/queryClient";
 import { setSessionExpiredHandler } from "@/lib/api";
 import { toast } from "sonner";
@@ -34,15 +35,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SessionRestore />
-      {children}
-      <Toaster
-        position="bottom-right"
-        toastOptions={{
-          className:
-            "animate-fade-in !bg-cream !text-ink !border-[3px] !border-ink !rounded-2xl !shadow-[4px_4px_0_0_#18130E] !font-bold",
-        }}
-      />
+      <ThemeProvider>
+        <SessionRestore />
+        {children}
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            className:
+              "animate-fade-in !bg-cream !text-ink !border-[3px] !border-ink !rounded-2xl !shadow-[4px_4px_0_0_#18130E] !font-bold",
+          }}
+        />
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

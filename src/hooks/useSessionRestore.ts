@@ -1,117 +1,149 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect } from "react";
+import { useAuth, getPersistedSession, getToken } from "../lib/auth-store";
+import { useWalletStore } from "../lib/wallet-store";
+import {
+  decideSessionRestore,
+  type SessionRestoreAction,
+  type WalletSnapshot,
+} from "../lib/walletSession";
+import { getAddress, isConnected } from "@stellar/freighter-api";
 import { toast } from "sonner";
-import { useAuth as useAuthStore, getPersistedSession } from "@/lib/auth-store";
-import { loginWithWallet, readWalletSnapshot, WalletError } from "@/lib/stellar";
-import { resetSessionExpired } from "@/lib/api";
-import { decideSessionRestore } from "@/lib/walletSession";
 
 /**
- * Re-establish the session for a persisted wallet identity, once per load.
+ * What Freighter reports right now, as a snapshot the restore decision reads.
  *
- * The token is never stored, so "restoring" means re-running the existing
- * SEP-10 flow — not reading a credential back out of the browser. It is
- * only attempted when the extension already reports the same account
- * without being prompted, which is exactly the case the user experiences
- * as "I was still connected".
+ * Never throws: an absent or locked extension is a state the app has to
+ * render, not an error to catch.
+ */
+async function probeWallet(): Promise<WalletSnapshot> {
+  try {
+    const connected = await isConnected();
+    if (!connected) return { status: "unavailable", publicKey: null };
+    const addressResult = await getAddress();
+    const publicKey =
+      typeof addressResult === "string" ? addressResult : addressResult?.address ?? null;
+    // Connected, but no account shared with this origin.
+    return { status: "resolved", publicKey };
+  } catch {
+    return { status: "unavailable", publicKey: null };
+  }
+}
+
+/** Public key the in-memory bearer token belongs to, or `null` when there is none. */
+function tokenPublicKey(): string | null {
+  if (!getToken()) return null;
+  return useAuth.getState().user?.stellarPublicKey ?? null;
+}
+
+/**
+ * Land the restore decision on store state.
  *
- * Everything browser-only lives inside this effect, so server rendering
- * is unaffected: the store starts in `pending` and the UI shows its
- * restoring state until this settles.
+ * Every branch settles `restoreStatus`, because "checking" keeps the auth
+ * guard on "Restoring your session…" and blocks the redirect to /login — a
+ * branch that returns without settling strands the user on a spinner with no
+ * wallet popup and no way to sign in.
+ *
+ * No branch runs a SEP-10 challenge. Re-establishing the session stays an
+ * explicit click on /login: the persisted identity makes that one click
+ * (the screen already names the account), and firing the challenge from load
+ * would pop the wallet unasked and re-fire on every failure.
+ */
+function applyRestoreAction(action: SessionRestoreAction): void {
+  const { setRestoreStatus, forgetWallet } = useAuth.getState();
+  const wallet = useWalletStore.getState();
+
+  switch (action) {
+    case "none":
+      // Nothing was persisted (or the payload was unusable): logged out.
+      setRestoreStatus("settled");
+      return;
+
+    case "restore":
+      // A live token already covers the persisted identity.
+      wallet.setConnected(true);
+      setRestoreStatus("settled");
+      return;
+
+    case "reauthenticate":
+      // Same wallet, expired token: show the identity and let the app's
+      // authorised requests send the user back to /login for one click.
+      wallet.setConnected(true);
+      setRestoreStatus("settled");
+      return;
+
+    case "expired":
+      toast.info("Session expired. Please sign in again.");
+      forgetWallet();
+      wallet.setConnected(false);
+      return;
+
+    case "account_changed":
+      toast.error("Freighter account switched. Please sign in again.");
+      forgetWallet();
+      wallet.setConnected(false);
+      return;
+
+    case "wait":
+    case "await_wallet":
+      // Freighter cannot confirm the account right now — absent, locked, or no
+      // account shared. The persisted identity stays: it is public data, and
+      // dropping it would lose the address the login screen shows the moment a
+      // user dismisses a Freighter popup. `probeWallet` always resolves, so
+      // "wait" is only reachable for a caller that passes a pending snapshot.
+      toast.error("Freighter wallet is disconnected or locked.");
+      wallet.setConnected(false);
+      setRestoreStatus("settled");
+      return;
+  }
+}
+
+/**
+ * Automatically checks session persistence and verifies Freighter connection status on app load.
+ * Resets store state and notifies via `sonner` toast if the wallet disconnected or account switched.
  */
 export function useSessionRestore() {
-  const queryClient = useQueryClient();
-  const hydrated = useAuthStore((s) => s.hydrated);
-  const restoreStatus = useAuthStore((s) => s.restoreStatus);
-  // A ref, not state: this must latch synchronously so a re-render
-  // during the async restore cannot start a second wallet round-trip.
-  const started = useRef(false);
+  const { setRestoreStatus, restoreStatus } = useAuth();
 
   useEffect(() => {
-    if (!hydrated || started.current) return;
-    started.current = true;
-
-    const store = useAuthStore.getState();
-    const persisted = getPersistedSession();
-    const tokenPublicKey = store.token ? store.user?.stellarPublicKey ?? null : null;
-
-    if (!persisted) {
-      store.setRestoreStatus("settled");
-      return;
-    }
+    // Both reads are needed. `restoreStatus` is what re-arms this effect when
+    // a caller resets it to "idle"; the live read is what stops the three
+    // surfaces that mount this hook (root `SessionRestore`, `Navbar`, and the
+    // app layout) from each firing their own probe — and their own toast —
+    // off the same render-time "idle".
+    if (restoreStatus !== "idle") return;
+    if (useAuth.getState().restoreStatus !== "idle") return;
 
     let cancelled = false;
-    store.setRestoreStatus("restoring");
 
-    void (async () => {
-      const wallet = await readWalletSnapshot().catch(() => ({
-        status: "unavailable" as const,
-        publicKey: null,
-      }));
+    async function restore() {
+      setRestoreStatus("checking");
+      const persisted = getPersistedSession();
+
+      // Without a persisted identity there is nothing to ask the wallet about.
+      const wallet = persisted ? await probeWallet() : { status: "resolved" as const, publicKey: null };
       if (cancelled) return;
-      // Reflect the wallet's own account straight away, so the UI can
-      // show which key is active even before a session exists for it.
-      useAuthStore.getState().setActiveWalletPublicKey(wallet.publicKey);
 
-      const action = decideSessionRestore({
-        persisted,
-        wallet,
-        tokenPublicKey,
-      });
+      applyRestoreAction(
+        decideSessionRestore({ persisted, wallet, tokenPublicKey: tokenPublicKey() })
+      );
+    }
 
-      switch (action) {
-        case "restore":
-          useAuthStore.getState().setRestoreStatus("settled");
-          return;
-
-        case "account_changed":
-          // Everything cached belongs to the previous public key.
-          queryClient.clear();
-          useAuthStore.getState().forgetWallet();
-          toast.info("Your wallet account changed. Connect again to continue.");
-          return;
-
-        case "expired":
-        case "await_wallet":
-        case "none":
-          // Recoverable: the login screen still offers a connect action.
-          queryClient.clear();
-          useAuthStore.getState().forgetWallet();
-          return;
-
-        case "reauthenticate":
-          try {
-            const user = await loginWithWallet();
-            if (cancelled) return;
-            resetSessionExpired();
-            if (user.stellarPublicKey !== persisted.publicKey) {
-              // The wallet switched accounts mid-restore.
-              queryClient.clear();
-            } else {
-              await queryClient.invalidateQueries();
-            }
-            useAuthStore.getState().setRestoreStatus("settled");
-          } catch (err) {
-            if (cancelled) return;
-            queryClient.clear();
-            useAuthStore.getState().forgetWallet();
-            if (err instanceof WalletError && err.code !== "user_rejected") {
-              toast.error(err.message);
-            }
-          }
-          return;
-
-        default:
-          useAuthStore.getState().setRestoreStatus("settled");
-      }
-    })();
+    void restore();
 
     return () => {
       cancelled = true;
     };
-  }, [hydrated, queryClient]);
+  }, [restoreStatus, setRestoreStatus]);
 
-  return { restoring: !hydrated || restoreStatus !== "settled" };
+  // Stable across renders: the app layout calls this from an effect, and a
+  // fresh closure every render would re-arm that effect on every render —
+  // resetting a settled restore back to "idle" forever.
+  const restoreSession = useCallback(
+    () => setRestoreStatus("idle"),
+    [setRestoreStatus]
+  );
+
+  return { restoreSession };
 }

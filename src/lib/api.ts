@@ -74,6 +74,7 @@ import type {
   UpdateExpenseRequest,
   UpdateMeRequest,
   UploadResponse,
+  User,
   VerifyResponse,
   Role,
 } from "./types";
@@ -171,7 +172,9 @@ async function request<T>(
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, { ...options, headers, body });
+    // Browser calls go through the same-origin Next.js API proxy
+    // (src/app/api/*), which forwards to the backend via API_URL.
+    res = await fetch(`/api${path}`, { ...options, headers, body });
   } catch (err) {
     // fetch only rejects on network-level failures (offline, DNS, CORS)
     // or intentional aborts. Normalize and report centrally — every call
@@ -223,6 +226,10 @@ export const api = {
       method: "POST",
       json: { transaction },
       schema: VerifyResponseSchema as unknown as z.ZodType<VerifyResponse>,
+    }),
+  authRefresh: () =>
+    request<{ token: string; user: User }>("/auth/refresh", {
+      method: "POST",
     }),
   authLogout: () =>
     request<{ ok: boolean }>("/auth/logout", {
@@ -330,7 +337,7 @@ export const api = {
 
     try {
       const res = await fetch(
-        `${API_URL}/groups/${groupId}/expenses`,
+        `/api/groups/${groupId}/expenses`,
         {
           method: "POST",
           headers,
@@ -547,9 +554,17 @@ export const api = {
       json: data,
       schema: AnchorSessionResponseSchema as unknown as z.ZodType<AnchorSessionResponse>,
     }),
+  anchorSession: (sessionId: string) =>
+    request<AnchorSessionResponse>(`/anchors/sessions/${sessionId}`, {
+      schema: AnchorSessionResponseSchema as unknown as z.ZodType<AnchorSessionResponse>,
+    }),
   anchorSessions: () =>
     request<AnchorSessionsResponse>("/anchors/sessions", {
       schema: AnchorSessionsResponseSchema as unknown as z.ZodType<AnchorSessionsResponse>,
+    }),
+  getAnchorSession: (sessionId: string) =>
+    request<AnchorSessionResponse>(`/anchors/sessions/${sessionId}`, {
+      schema: AnchorSessionResponseSchema as unknown as z.ZodType<AnchorSessionResponse>,
     }),
 
   // -- history & uploads ------------------------------------------------------------
@@ -581,3 +596,14 @@ export const api = {
     });
   },
 };
+
+/**
+ * Fetch invite details by code without redeeming the invite.
+ * Kept outside the `api` object to avoid TypeScript inference-depth
+ * issues with the very large object literal.
+ */
+export function getInviteByCode(code: string) {
+  return request<InviteResponse>(`/invites/${encodeURIComponent(code)}`, {
+    schema: InviteResponseSchema as unknown as z.ZodType<InviteResponse>,
+  });
+}
