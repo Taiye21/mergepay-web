@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -24,22 +24,25 @@ import { useWalletScopedCache } from "@/lib/queries";
 import { useWalletStatus } from "@/hooks/useWalletStatus";
 import { WalletStatusPanel } from "./wallet/wallet-status";
 import { shortKey } from "@/lib/format";
-import { FOCUSABLE_SELECTOR, nextFocusIndex } from "@/lib/dialog";
+import { useDialogFocus } from "./ui/useDialogFocus";
 
 import { HorizonHealthIndicator } from "./HorizonHealthIndicator";
 import { OfflineSyncBanner } from "./OfflineSyncBanner";
 import { OfflineBanner } from "./OfflineBanner";
 import { useOfflineSync } from "@/hooks/useOfflineSync";
 import { BottomNav } from "./layout/BottomNav";
+import { CommandPalette } from "./CommandPalette";
 
 
-const NAV = [
+export const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/groups", label: "Groups", icon: Users },
   { href: "/anchors", label: "Anchors", icon: Banknote },
   { href: "/history", label: "History", icon: History },
   { href: "/settings", label: "Settings", icon: Settings },
-];
+] as const;
+
+export type NAV = typeof NAV[number];
 
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -48,62 +51,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const { refresh: refreshWallet, ...walletStatus } = useWalletStatus();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  const getDrawerFocusable = useCallback(
-    () =>
-      drawerRef.current
-        ? Array.from(
-            drawerRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-          ).filter((el) => el.tabIndex !== -1)
-        : [],
-    []
-  );
+  // Escape, Tab trapping, focus containment and the page scroll lock while the
+  // nav drawer is open — the same contract the dialog primitive gives, so a
+  // dialog opened over the drawer owns Escape and focus instead of both
+  // surfaces reacting to the same key press.
+  useDialogFocus({
+    open: mobileOpen,
+    onClose: () => setMobileOpen(false),
+    panelRef: drawerRef,
+  });
 
-  // Trap focus inside mobile drawer and handle Escape to close.
   useEffect(() => {
-    if (!mobileOpen) return;
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
+    function handleGlobalKeyDown(e: KeyboardEvent) {
+      const tag = (document.activeElement?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || document.activeElement?.hasAttribute("contenteditable")) return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
         e.stopPropagation();
-        setMobileOpen(false);
-        return;
+        setCmdPaletteOpen((prev) => !prev);
       }
-      if (e.key !== "Tab") return;
-      const focusable = getDrawerFocusable();
-      if (focusable.length === 0) return;
-      const active = document.activeElement as HTMLElement | null;
-      const target = nextFocusIndex(
-        focusable.length,
-        active ? focusable.indexOf(active) : -1,
-        e.shiftKey
-      );
-      if (target === null) return;
-      e.preventDefault();
-      focusable[target]?.focus();
     }
-
-    window.addEventListener("keydown", handleKeyDown, true);
-
-    // Focus the first focusable element in the drawer after mount.
-    const frame = requestAnimationFrame(() => {
-      const focusable = getDrawerFocusable();
-      if (focusable.length > 0) focusable[0]?.focus();
-    });
-
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("keydown", handleKeyDown, true);
-      // Restore focus to the trigger when the drawer closes.
-      previousFocusRef.current?.focus();
-    };
-  }, [mobileOpen, getDrawerFocusable]);
+    window.addEventListener("keydown", handleGlobalKeyDown, true);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
+  }, []);
 
   // Group content must never survive a switch to a different wallet.
   useWalletScopedCache();
@@ -209,19 +182,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* mobile drawer */}
       {mobileOpen && (
-        <div
-          className="fixed inset-0 z-50 lg:hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Navigation menu"
-        >
+        <div className="fixed inset-0 z-50 lg:hidden">
           <div
             className="absolute inset-0 bg-ink/60"
             onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
           />
           <div
             ref={drawerRef}
-            className="absolute inset-y-0 left-0 flex w-72 flex-col border-r-3 border-ink bg-paper"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
+            // The dialog is where focus lands, so it has to be focusable.
+            tabIndex={-1}
+            className="absolute inset-y-0 left-0 flex w-72 flex-col border-r-3 border-ink bg-paper outline-none"
           >
             <button
               onClick={() => setMobileOpen(false)}
@@ -235,7 +209,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <main className="lg:pl-64 pb-20 lg:pb-0">
+      {/* The bottom padding clears the fixed mobile bottom nav, plus the
+          device's safe-area inset so content is not hidden by a home
+          indicator (#542). */}
+      <main className="lg:pl-64 pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0">
         {/* Persistent reconnect prompt while the Freighter wallet is
             disconnected; also hosts the connection poll. */}
         <WalletDisconnectedBanner />
@@ -246,6 +223,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </main>
       <BottomNav />
+      <CommandPalette open={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} />
     </div>
   );
 }
