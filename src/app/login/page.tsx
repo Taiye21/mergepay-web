@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -31,6 +31,7 @@ import {
   NETWORK_PASSPHRASE,
 } from "@/lib/constants";
 import { handleApiError } from "@/lib/errorHandler";
+import { showWalletErrorToast } from "@/lib/walletToasts";
 import { inviteJoinPath } from "@/lib/inviteLink";
 
 /**
@@ -58,6 +59,21 @@ function postLoginTarget(): string {
 export default function LoginPage() {
   const router = useRouter();
   const { token, restoring, login, isLoading: authLoading } = useAuth();
+  /**
+   * Where this sign-in leads, read once.
+   *
+   * Two paths redirect on authentication — the effect below for a session
+   * that appears from storage or another tab, and `handleConnect` for the
+   * click — and the parked invite is single-use: whichever reads it first
+   * consumes it. Resolved lazily into a ref, both paths agree; read twice,
+   * the second got `/dashboard` and an invitee who signed in was dumped
+   * away from the link they followed.
+   */
+  const targetRef = useRef<string | null>(null);
+  const loginTarget = useCallback(() => {
+    if (targetRef.current === null) targetRef.current = postLoginTarget();
+    return targetRef.current;
+  }, []);
   // The wallet's own active account, tracked independently of the
   // session, so the screen names the key the user is about to sign with.
   const activeWalletPublicKey = useAuthStore((s) => s.activeWalletPublicKey);
@@ -68,8 +84,8 @@ export default function LoginPage() {
   const [walletNetwork, setWalletNetwork] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!restoring && token) router.replace(postLoginTarget());
-  }, [restoring, token, router]);
+    if (!restoring && token) router.replace(loginTarget());
+  }, [restoring, token, router, loginTarget]);
 
   useEffect(() => {
     isFreighterAvailable().then(setHasFreighter);
@@ -91,14 +107,20 @@ export default function LoginPage() {
     };
   }, [hasFreighter]);
 
+  // Blocks a second click before React re-renders with `loading` set: each
+  // click would open its own Freighter popup (#487).
+  const connectingRef = useRef(false);
+
   async function handleConnect() {
+    if (connectingRef.current) return;
+    connectingRef.current = true;
     setLoading(true);
     try {
       const user = await login();
       if (user) {
         setWalletNetwork(null);
         toast.success("Signed in with Stellar");
-        router.replace(postLoginTarget());
+        router.replace(loginTarget());
       }
     } catch (e) {
       if (e instanceof NetworkMismatchError) {
@@ -106,12 +128,19 @@ export default function LoginPage() {
         // the extension, which takes longer than a toast lives.
         setWalletNetwork(e.walletNetwork);
       } else if (e instanceof WalletError) {
-        // Rich message with an install link — shown instead of plain text.
-        toast.error(e.code === "not_installed" ? <NotInstalledMessage /> : e.message);
+        if (e.code === "not_installed") {
+          // Rich message with an install link — shown instead of plain text.
+          toast.error(<NotInstalledMessage />);
+        } else {
+          // A locked wallet gets its remediation line, so the failure names
+          // the step that fixes it (#487).
+          showWalletErrorToast(e.code, e.message);
+        }
       } else {
         handleApiError(e, "Could not sign in. Please try again.");
       }
     } finally {
+      connectingRef.current = false;
       setLoading(false);
     }
   }
@@ -188,6 +217,7 @@ export default function LoginPage() {
                 className="mt-7 flex items-center justify-center gap-2 rounded-xl border-2 border-ink bg-butter-pale px-4 py-3 text-sm"
                 role="status"
                 aria-live="polite"
+                data-testid="login-restoring"
               >
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Restoring your session…
@@ -198,6 +228,7 @@ export default function LoginPage() {
                 size="lg"
                 onClick={handleConnect}
                 disabled={loading || authLoading}
+                data-testid="login-connect"
               >
                 {loading || authLoading ? (
                   <>
@@ -214,7 +245,7 @@ export default function LoginPage() {
             )}
 
             {!restoring && activeWalletPublicKey && (
-              <p className="mt-3 text-center text-xs text-ink/60">
+              <p className="mt-3 text-center text-xs text-ink/60" data-testid="login-wallet">
                 Freighter is on{" "}
                 <span className="font-mono font-bold">
                   {shortKey(activeWalletPublicKey)}

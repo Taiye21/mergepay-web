@@ -1,8 +1,11 @@
+"use client";
+
 import * as React from "react";
-import { useEffect, useRef } from "react";
+import { useRef, useId } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
+import { useDialogFocus } from "./useDialogFocus";
 
 export interface DialogProps {
   open: boolean;
@@ -25,75 +28,12 @@ export function Dialog({
   dismissible = true,
 }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const previousActiveElement = useRef<HTMLElement | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
-  const titleId = React.useId();
-  const descriptionId = React.useId();
+  const titleId = useId();
+  const descriptionId = useId();
 
-  // Store the previously focused element and restore focus on close
-  useEffect(() => {
-    if (open) {
-      previousActiveElement.current = document.activeElement as HTMLElement;
-      // Focus the dialog container or first focusable element
-      const timer = setTimeout(() => {
-        if (dialogRef.current) {
-          const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-          );
-          if (focusable.length > 0) {
-            focusable[0].focus();
-          } else {
-            dialogRef.current.focus();
-          }
-        }
-      }, 50);
-      return () => clearTimeout(timer);
-    } else {
-      if (previousActiveElement.current && typeof previousActiveElement.current.focus === "function") {
-        previousActiveElement.current.focus();
-      }
-    }
-  }, [open]);
-
-  // Handle Escape key and focus trapping
-  useEffect(() => {
-    if (!open) return;
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && dismissible) {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-
-      if (e.key === "Tab" && dialogRef.current) {
-        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable.length === 0) return;
-
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            last.focus();
-            e.preventDefault();
-          }
-        } else {
-          if (document.activeElement === last) {
-            first.focus();
-            e.preventDefault();
-          }
-        }
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open, onClose, dismissible]);
+  useDialogFocus({ open, onClose, panelRef: dialogRef, contentRef, dismissible });
 
   if (!open) return null;
 
@@ -137,12 +77,16 @@ export function Dialog({
         </div>
 
         {description && (
-          <p id={descriptionId} className="sr-only">
+          <p id={descriptionId} className="text-sm text-ink/70">
             {description}
           </p>
         )}
 
-        <div className="pt-4">{children}</div>
+        {/* `contentRef` is what the focus rules read; the matching attribute
+            stays as a stable hook for styling and tests. */}
+        <div className="pt-4" data-dialog-content ref={contentRef}>
+          {children}
+        </div>
       </div>
     </div>
   );
