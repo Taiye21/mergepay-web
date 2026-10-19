@@ -1,16 +1,21 @@
 "use client";
 
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { AlertTriangle, LayoutDashboard, RefreshCw } from "lucide-react";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { logRenderError } from "@/lib/errorHandler";
 
 interface Props {
   children: ReactNode;
   fallback?: ReactNode | ((error: Error, resetErrorBoundary: () => void) => ReactNode);
   onReset?: () => void;
   onError?: (error: Error, errorInfo: ErrorInfo) => void;
+  /** Destination of the "Return to Dashboard" escape hatch. */
+  dashboardHref?: string;
 }
+
+const DEFAULT_DASHBOARD_HREF = "/dashboard";
 
 interface State {
   hasError: boolean;
@@ -33,8 +38,10 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("[ErrorBoundary] caught an error:", error);
-    console.error("[ErrorBoundary] component stack:", errorInfo.componentStack);
+    // Structured and production-silent — the component stack of a crashed
+    // group view is full of account data that has no business in a browser
+    // console. Callers that need the raw error can subscribe via `onError`.
+    logRenderError(error, { componentStack: errorInfo.componentStack });
     this.props.onError?.(error, errorInfo);
   }
 
@@ -75,7 +82,17 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+              {/* Full document navigation on purpose: a crashed subtree should
+                  come back through a clean reload rather than a soft client
+                  transition that could re-enter the same broken state. */}
+              <a
+                href={this.props.dashboardHref ?? DEFAULT_DASHBOARD_HREF}
+                className={buttonClassName("outline", "md")}
+              >
+                <LayoutDashboard className="h-4 w-4 mr-1" />
+                Return to Dashboard
+              </a>
               <Button onClick={this.handleReset} variant="primary">
                 <RefreshCw className="h-4 w-4 mr-1" />
                 Try Again
